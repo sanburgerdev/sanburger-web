@@ -487,11 +487,11 @@ function ProductCard({ product, categoryEmoji, onAdd, adminMode, onUpdate }) {
           )}
         </div>
         {adminMode && (
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex flex-col gap-2 mt-1">
             <label className="flex items-center gap-1 text-xs" style={{ color: COLORS.gray }}>
               <input type="checkbox" checked={product.disponible} onChange={(e) => onUpdate({ disponible: e.target.checked })} /> disponible
             </label>
-            <input type="text" placeholder="URL imagen" value={product.imagen || ""} onChange={(e) => onUpdate({ imagen: e.target.value })} className="flex-1 px-2 py-1 rounded text-xs font-mono" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.white }} />
+            <PhotoUploadButton product={product} onUpdate={onUpdate} />
           </div>
         )}
         <div className="mt-auto pt-3 flex gap-2">
@@ -503,6 +503,57 @@ function ProductCard({ product, categoryEmoji, onAdd, adminMode, onUpdate }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function PhotoUploadButton({ product, onUpdate }) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const inputId = `foto-${product.id}`;
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setError("");
+    try {
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `${product.id}-${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from("productos")
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if (uploadError) throw uploadError;
+      const { data } = supabase.storage.from("productos").getPublicUrl(path);
+      onUpdate({ imagen: data.publicUrl });
+    } catch (err) {
+      setError("No se pudo subir la foto. Intenta de nuevo.");
+      console.error(err);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <label
+        htmlFor={inputId}
+        className="text-xs px-3 py-2 rounded-full font-display cursor-pointer whitespace-nowrap"
+        style={{ background: COLORS.yellow, color: COLORS.black, opacity: uploading ? 0.6 : 1 }}
+      >
+        {uploading ? "SUBIENDO..." : product.imagen ? "CAMBIAR FOTO 📷" : "SUBIR FOTO 📷"}
+      </label>
+      <input
+        id={inputId}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleFile}
+        disabled={uploading}
+        className="hidden"
+      />
+      {error && <span className="text-xs" style={{ color: COLORS.red }}>{error}</span>}
     </div>
   );
 }
