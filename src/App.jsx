@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
+import ChatBot from "./ChatBot";
 
 /* ============================================================
    SANBURGER — sitio web oficial
@@ -50,6 +51,7 @@ export default function SanBurgerSite() {
   const [products, setProducts] = useState([]);
   const [settings, setSettings] = useState({});
   const [promos, setPromos] = useState([]);
+  const [zonas, setZonas] = useState([]);
 
   const [activeCat, setActiveCat] = useState(null);
   const [cart, setCart] = useState([]);
@@ -57,6 +59,8 @@ export default function SanBurgerSite() {
   const [clienteNombre, setClienteNombre] = useState("");
   const [clienteDireccion, setClienteDireccion] = useState("");
   const [clientePago, setClientePago] = useState("Efectivo");
+  const [clienteTipoEntrega, setClienteTipoEntrega] = useState("domicilio");
+  const [clienteZonaId, setClienteZonaId] = useState("");
 
   const [session, setSession] = useState(null);
   const [adminGateOpen, setAdminGateOpen] = useState(false);
@@ -66,6 +70,7 @@ export default function SanBurgerSite() {
   const [savingFlash, setSavingFlash] = useState(false);
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   const adminMode = !!session;
 
@@ -78,16 +83,18 @@ export default function SanBurgerSite() {
 
   /* ---------- Cargar datos reales de Supabase ---------- */
   async function loadAll() {
-    const [{ data: cats }, { data: prods }, { data: config }, { data: promoRows }] = await Promise.all([
+    const [{ data: cats }, { data: prods }, { data: config }, { data: promoRows }, { data: zonaRows }] = await Promise.all([
       supabase.from("categorias").select("*").order("orden"),
       supabase.from("productos").select("*").order("orden"),
       supabase.from("configuracion").select("*").eq("id", 1).single(),
       supabase.from("promociones").select("*").order("orden"),
+      supabase.from("zonas_domicilio").select("*").order("orden"),
     ]);
     setCategories(cats || []);
     setProducts(prods || []);
     setSettings(config || {});
     setPromos(promoRows || []);
+    setZonas(zonaRows || []);
     if (cats && cats.length > 0) setActiveCat((prev) => prev || cats[0].id);
     setLoading(false);
   }
@@ -132,6 +139,24 @@ export default function SanBurgerSite() {
     await supabase.from("promociones").delete().eq("id", id);
   }
 
+  async function addZona() {
+    const { data, error } = await supabase
+      .from("zonas_domicilio")
+      .insert({ nombre: "Nueva zona", precio: 0, activa: true, orden: zonas.length })
+      .select()
+      .single();
+    if (!error && data) setZonas((prev) => [...prev, data]);
+  }
+  async function updateZona(id, patch) {
+    setZonas((prev) => prev.map((z) => (z.id === id ? { ...z, ...patch } : z)));
+    const { error } = await supabase.from("zonas_domicilio").update(patch).eq("id", id);
+    if (!error) flashSaved();
+  }
+  async function deleteZona(id) {
+    setZonas((prev) => prev.filter((z) => z.id !== id));
+    await supabase.from("zonas_domicilio").delete().eq("id", id);
+  }
+
   /* ---------- Carrito ---------- */
   function addToCart(product, esCombo) {
     const precio = esCombo ? product.combo_precio : product.precio;
@@ -153,7 +178,10 @@ export default function SanBurgerSite() {
     setCart((prev) => prev.map((i) => (i.key === key ? { ...i, nota } : i)));
   }
 
-  const total = useMemo(() => cart.reduce((s, i) => s + i.precio * i.cantidad, 0), [cart]);
+  const zonaSeleccionada = zonas.find((z) => z.id === clienteZonaId);
+  const costoDomicilio = clienteTipoEntrega === "domicilio" && zonaSeleccionada ? Number(zonaSeleccionada.precio) : 0;
+  const subtotal = useMemo(() => cart.reduce((s, i) => s + i.precio * i.cantidad, 0), [cart]);
+  const total = subtotal + costoDomicilio;
   const cartCount = useMemo(() => cart.reduce((s, i) => s + i.cantidad, 0), [cart]);
 
   function buildWhatsAppMessage() {
@@ -166,9 +194,14 @@ export default function SanBurgerSite() {
       if (i.nota) msg += ` — ${i.nota}`;
       msg += `\n`;
     });
+    if (clienteTipoEntrega === "domicilio" && zonaSeleccionada) {
+      msg += `\n🛵 Domicilio (${zonaSeleccionada.nombre}): ${formatCOP(costoDomicilio)}`;
+    }
+    msg += `\n\nSubtotal: ${formatCOP(subtotal)}`;
+    if (costoDomicilio > 0) msg += `\nDomicilio: ${formatCOP(costoDomicilio)}`;
     msg += `\nTotal: ${formatCOP(total)}\n\n`;
     msg += `Nombre: ${clienteNombre || "-"}\n`;
-    msg += `Dirección: ${clienteDireccion || "-"}\n`;
+    msg += clienteTipoEntrega === "domicilio" ? `Zona: ${zonaSeleccionada ? zonaSeleccionada.nombre : "-"}\nDirección: ${clienteDireccion || "-"}\n` : `Recoge en el local\n`;
     msg += `Forma de pago: ${clientePago}`;
     return msg;
   }
@@ -337,6 +370,28 @@ export default function SanBurgerSite() {
         </p>
       </section>
 
+      {/* ---------- ZONAS DE DOMICILIO (solo admin) ---------- */}
+      {adminMode && (
+        <section className="max-w-3xl mx-auto px-4 py-10">
+          <h2 className="font-display text-2xl text-center mb-1">🛵 ZONAS DE DOMICILIO</h2>
+          <p className="text-center mb-6 text-sm" style={{ color: COLORS.gray }}>Define aquí las zonas y su costo — el cliente las ve al escoger domicilio.</p>
+          <div className="flex flex-col gap-2">
+            {zonas.map((z) => (
+              <div key={z.id} className="flex items-center gap-2 p-3 rounded-xl" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}` }}>
+                <EditableText value={z.nombre} onChange={(v) => updateZona(z.id, { nombre: v })} className="flex-1 bg-transparent text-sm" style={{ color: COLORS.white }} />
+                <input type="number" value={z.precio} onChange={(e) => updateZona(z.id, { precio: Number(e.target.value) })} className="w-24 font-mono text-sm bg-transparent" style={{ color: COLORS.yellow, border: `1px dashed ${COLORS.gray}`, borderRadius: 6, padding: "2px 6px" }} />
+                <label className="flex items-center gap-1 text-xs" style={{ color: COLORS.gray }}>
+                  <input type="checkbox" checked={z.activa} onChange={(e) => updateZona(z.id, { activa: e.target.checked })} /> activa
+                </label>
+                <button onClick={() => deleteZona(z.id)} className="text-xs" style={{ color: COLORS.red }}>eliminar</button>
+              </div>
+            ))}
+            {zonas.length === 0 && <p className="text-center text-sm" style={{ color: COLORS.gray }}>Aún no has agregado zonas.</p>}
+          </div>
+          <button onClick={addZona} className="mt-4 mx-auto block font-display text-sm px-5 py-2 rounded-full" style={{ background: COLORS.red, color: COLORS.white }}>+ AGREGAR ZONA</button>
+        </section>
+      )}
+
       {/* ---------- CONTACTO ---------- */}
       <section id="contacto" className="py-12" style={{ background: COLORS.panel, borderTop: `1px solid ${COLORS.line}` }}>
         <div className="max-w-3xl mx-auto px-4">
@@ -372,6 +427,18 @@ export default function SanBurgerSite() {
         </button>
         <a href={`https://wa.me/${settings.whatsapp}`} target="_blank" rel="noreferrer" className="flex flex-col items-center text-xs">📲<span>WhatsApp</span></a>
       </div>
+
+      {/* ---------- BURBUJA DEL CHATBOT ---------- */}
+      {!chatOpen && (
+        <button
+          onClick={() => setChatOpen(true)}
+          className="fixed bottom-20 md:bottom-6 right-4 z-40 rounded-full w-14 h-14 flex items-center justify-center text-2xl shadow-2xl"
+          style={{ background: COLORS.red, color: COLORS.white }}
+        >
+          💬
+        </button>
+      )}
+      <ChatBot categories={categories} products={products} settings={settings} zonas={zonas} open={chatOpen} onClose={() => setChatOpen(false)} />
 
       {/* ---------- CARRITO ("comanda") ---------- */}
       {cartOpen && (
@@ -411,13 +478,31 @@ export default function SanBurgerSite() {
 
               {cart.length > 0 && (
                 <>
-                  <div className="flex justify-between items-center py-3 font-display text-lg">
+                  <div className="flex flex-col gap-1 py-2 text-sm" style={{ color: COLORS.gray }}>
+                    <div className="flex justify-between"><span>Subtotal</span><span>{formatCOP(subtotal)}</span></div>
+                    {costoDomicilio > 0 && <div className="flex justify-between"><span>Domicilio ({zonaSeleccionada?.nombre})</span><span>{formatCOP(costoDomicilio)}</span></div>}
+                  </div>
+                  <div className="flex justify-between items-center py-1 font-display text-lg">
                     <span>TOTAL</span>
                     <span style={{ color: COLORS.yellow }}>{formatCOP(total)}</span>
                   </div>
-                  <div className="flex flex-col gap-2 mb-3">
+                  <div className="flex flex-col gap-2 my-3">
                     <input type="text" placeholder="Tu nombre" value={clienteNombre} onChange={(e) => setClienteNombre(e.target.value)} className="px-3 py-2 rounded text-sm" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.white }} />
-                    <input type="text" placeholder="Dirección (si es domicilio)" value={clienteDireccion} onChange={(e) => setClienteDireccion(e.target.value)} className="px-3 py-2 rounded text-sm" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.white }} />
+                    <div className="flex gap-2">
+                      <button onClick={() => setClienteTipoEntrega("domicilio")} className="flex-1 px-3 py-2 rounded text-sm font-display" style={clienteTipoEntrega === "domicilio" ? { background: COLORS.red, color: COLORS.white } : { background: COLORS.panel2, color: COLORS.gray, border: `1px solid ${COLORS.line}` }}>🛵 Domicilio</button>
+                      <button onClick={() => setClienteTipoEntrega("local")} className="flex-1 px-3 py-2 rounded text-sm font-display" style={clienteTipoEntrega === "local" ? { background: COLORS.red, color: COLORS.white } : { background: COLORS.panel2, color: COLORS.gray, border: `1px solid ${COLORS.line}` }}>🏠 Recoger</button>
+                    </div>
+                    {clienteTipoEntrega === "domicilio" && (
+                      <>
+                        <select value={clienteZonaId} onChange={(e) => setClienteZonaId(e.target.value)} className="px-3 py-2 rounded text-sm" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.white }}>
+                          <option value="">Selecciona tu zona...</option>
+                          {zonas.filter((z) => z.activa).map((z) => (
+                            <option key={z.id} value={z.id}>{z.nombre} — {formatCOP(z.precio)}</option>
+                          ))}
+                        </select>
+                        <input type="text" placeholder="Dirección exacta" value={clienteDireccion} onChange={(e) => setClienteDireccion(e.target.value)} className="px-3 py-2 rounded text-sm" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.white }} />
+                      </>
+                    )}
                     <select value={clientePago} onChange={(e) => setClientePago(e.target.value)} className="px-3 py-2 rounded text-sm" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.white }}>
                       <option>Efectivo</option>
                       <option>Transferencia</option>
