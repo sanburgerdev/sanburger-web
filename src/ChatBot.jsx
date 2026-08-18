@@ -31,9 +31,11 @@ const STEPS = {
   COMBO: "combo",
   NOTA: "nota",
   MAS: "mas",
+  CELULAR: "celular",
   NOMBRE: "nombre",
   TIPO: "tipo",
   ZONA: "zona",
+  DIRECCION_CONFIRM: "direccion_confirm",
   DIRECCION: "direccion",
   PAGO: "pago",
   RESUMEN: "resumen",
@@ -48,6 +50,8 @@ export default function ChatBot({ categories, products, settings, zonas = [], op
   const [pendingCat, setPendingCat] = useState(null);
   const [pendingProduct, setPendingProduct] = useState(null);
   const [cart, setCart] = useState([]);
+  const [telefono, setTelefono] = useState("");
+  const [clienteExistente, setClienteExistente] = useState(null);
   const [nombre, setNombre] = useState("");
   const [tipo, setTipo] = useState("domicilio");
   const [zona, setZona] = useState(null);
@@ -124,8 +128,29 @@ export default function ChatBot({ categories, products, settings, zonas = [], op
       setStep(STEPS.MENU);
       bot("Dale, ¿qué más se te antoja?");
     } else {
+      setStep(STEPS.CELULAR);
+      bot("Perfecto. ¿Cuál es tu número de celular?");
+    }
+  }
+
+  async function submitCelular() {
+    if (!textInput.trim()) return;
+    const tel = textInput.replace(/[^0-9]/g, "");
+    user(tel);
+    setTelefono(tel);
+    setTextInput("");
+
+    const { data } = await supabase.from("clientes").select("*").eq("telefono", tel).maybeSingle();
+
+    if (data) {
+      setClienteExistente(data);
+      setNombre(data.nombre || "");
+      bot(`¡Qué bueno tenerte de vuelta, ${data.nombre || "vecino"}! 👋 ¿Es para domicilio o lo recoges en el local?`);
+      setStep(STEPS.TIPO);
+    } else {
+      setClienteExistente(null);
+      bot("No te tengo registrado todavía. ¿Cuál es tu nombre?");
       setStep(STEPS.NOMBRE);
-      bot("Perfecto. ¿Cuál es tu nombre?");
     }
   }
 
@@ -146,8 +171,7 @@ export default function ChatBot({ categories, products, settings, zonas = [], op
         setStep(STEPS.ZONA);
         bot("¿En qué zona vives?");
       } else {
-        setStep(STEPS.DIRECCION);
-        bot("¿A qué dirección te lo llevamos?");
+        irADireccion();
       }
     } else {
       setStep(STEPS.PAGO);
@@ -155,11 +179,34 @@ export default function ChatBot({ categories, products, settings, zonas = [], op
     }
   }
 
+  function irADireccion() {
+    if (clienteExistente && clienteExistente.direccion) {
+      setStep(STEPS.DIRECCION_CONFIRM);
+      bot(`¿Lo enviamos a tu dirección guardada (${clienteExistente.direccion}) o prefieres otra?`);
+    } else {
+      setStep(STEPS.DIRECCION);
+      bot("¿A qué dirección te lo llevamos?");
+    }
+  }
+
   function pickZona(z) {
     user(z.nombre);
     setZona(z);
+    bot(`El domicilio a ${z.nombre} cuesta ${formatCOP(z.precio)}.`);
+    irADireccion();
+  }
+
+  function usarDireccionGuardada() {
+    user(`Usar mi dirección: ${clienteExistente.direccion}`);
+    setDireccion(clienteExistente.direccion);
+    setStep(STEPS.PAGO);
+    bot("¿Cómo vas a pagar?");
+  }
+
+  function cambiarDireccion() {
+    user("Prefiero dar otra dirección");
     setStep(STEPS.DIRECCION);
-    bot(`El domicilio a ${z.nombre} cuesta ${formatCOP(z.precio)}. ¿Cuál es tu dirección exacta?`);
+    bot("Dale, ¿cuál es la dirección esta vez?");
   }
 
   function submitDireccion() {
@@ -198,10 +245,25 @@ export default function ChatBot({ categories, products, settings, zonas = [], op
           ? `Domicilio (${zona ? zona.nombre : "sin zona"} · ${formatCOP(costoDomicilio)}): ${direccion} · Pago: ${pago}`
           : `Recoge en local · Pago: ${pago}`;
 
+      // Guarda o actualiza la ficha del cliente (para la próxima vez que escriba)
+      let clienteId = clienteExistente ? clienteExistente.id : null;
+      if (telefono) {
+        const { data: clienteGuardado } = await supabase
+          .from("clientes")
+          .upsert(
+            { telefono, nombre, direccion: tipo === "domicilio" ? direccion : clienteExistente?.direccion || null, barrio: zona ? zona.nombre : clienteExistente?.barrio || null },
+            { onConflict: "telefono" }
+          )
+          .select()
+          .single();
+        if (clienteGuardado) clienteId = clienteGuardado.id;
+      }
+
       const { data, error } = await supabase
         .from("pedidos")
         .insert({
           tipo: "domicilio",
+          cliente_id: clienteId,
           cliente_nombre: nombre,
           estado: "nuevo",
           items,
@@ -255,6 +317,8 @@ export default function ChatBot({ categories, products, settings, zonas = [], op
   function reiniciar() {
     setMessages([]);
     setCart([]);
+    setTelefono("");
+    setClienteExistente(null);
     setNombre("");
     setZona(null);
     setDireccion("");
@@ -327,6 +391,10 @@ export default function ChatBot({ categories, products, settings, zonas = [], op
             </ChipRow>
           )}
 
+          {step === STEPS.CELULAR && (
+            <TextRow value={textInput} onChange={setTextInput} placeholder="Tu número de celular..." onSubmit={submitCelular} />
+          )}
+
           {step === STEPS.NOMBRE && (
             <TextRow value={textInput} onChange={setTextInput} placeholder="Tu nombre..." onSubmit={submitNombre} />
           )}
@@ -343,6 +411,13 @@ export default function ChatBot({ categories, products, settings, zonas = [], op
               {zonas.filter((z) => z.activa).map((z) => (
                 <Chip key={z.id} onClick={() => pickZona(z)}>{z.nombre} · {formatCOP(z.precio)}</Chip>
               ))}
+            </ChipRow>
+          )}
+
+          {step === STEPS.DIRECCION_CONFIRM && (
+            <ChipRow>
+              <Chip onClick={usarDireccionGuardada}>✅ Usar esa dirección</Chip>
+              <Chip onClick={cambiarDireccion} muted>✏️ Dar otra dirección</Chip>
             </ChipRow>
           )}
 
