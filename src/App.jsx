@@ -56,6 +56,8 @@ export default function SanBurgerSite() {
   const [activeCat, setActiveCat] = useState(null);
   const [cart, setCart] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
+  const [clienteTelefono, setClienteTelefono] = useState("");
+  const [clienteEncontrado, setClienteEncontrado] = useState(null);
   const [clienteNombre, setClienteNombre] = useState("");
   const [clienteDireccion, setClienteDireccion] = useState("");
   const [clientePago, setClientePago] = useState("Efectivo");
@@ -206,7 +208,31 @@ export default function SanBurgerSite() {
     return msg;
   }
 
+  async function buscarClientePorTelefono() {
+    const tel = clienteTelefono.replace(/[^0-9]/g, "");
+    if (tel.length < 7) return;
+    const { data } = await supabase.from("clientes").select("*").eq("telefono", tel).maybeSingle();
+    if (data) {
+      setClienteEncontrado(data);
+      if (!clienteNombre) setClienteNombre(data.nombre || "");
+      if (!clienteDireccion && data.direccion) setClienteDireccion(data.direccion);
+    } else {
+      setClienteEncontrado(null);
+    }
+  }
+
   function sendWhatsApp() {
+    const tel = clienteTelefono.replace(/[^0-9]/g, "");
+    if (tel) {
+      supabase
+        .from("clientes")
+        .upsert(
+          { telefono: tel, nombre: clienteNombre, direccion: clienteTipoEntrega === "domicilio" ? clienteDireccion : clienteEncontrado?.direccion || null, barrio: zonaSeleccionada ? zonaSeleccionada.nombre : clienteEncontrado?.barrio || null },
+          { onConflict: "telefono" }
+        )
+        .then(() => {})
+        .catch(() => {});
+    }
     const text = encodeURIComponent(buildWhatsAppMessage());
     window.open(`https://wa.me/${settings.whatsapp}?text=${text}`, "_blank");
   }
@@ -487,6 +513,10 @@ export default function SanBurgerSite() {
                     <span style={{ color: COLORS.yellow }}>{formatCOP(total)}</span>
                   </div>
                   <div className="flex flex-col gap-2 my-3">
+                    <input type="tel" placeholder="Tu número de celular" value={clienteTelefono} onChange={(e) => setClienteTelefono(e.target.value)} onBlur={buscarClientePorTelefono} className="px-3 py-2 rounded text-sm" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.white }} />
+                    {clienteEncontrado && (
+                      <p className="text-xs" style={{ color: COLORS.yellow }}>👋 ¡Qué bueno verte de nuevo, {clienteEncontrado.nombre}! Ya rellenamos tus datos — cámbialos si algo es distinto esta vez.</p>
+                    )}
                     <input type="text" placeholder="Tu nombre" value={clienteNombre} onChange={(e) => setClienteNombre(e.target.value)} className="px-3 py-2 rounded text-sm" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.white }} />
                     <div className="flex gap-2">
                       <button onClick={() => setClienteTipoEntrega("domicilio")} className="flex-1 px-3 py-2 rounded text-sm font-display" style={clienteTipoEntrega === "domicilio" ? { background: COLORS.red, color: COLORS.white } : { background: COLORS.panel2, color: COLORS.gray, border: `1px solid ${COLORS.line}` }}>🛵 Domicilio</button>
@@ -501,6 +531,9 @@ export default function SanBurgerSite() {
                           ))}
                         </select>
                         <input type="text" placeholder="Dirección exacta" value={clienteDireccion} onChange={(e) => setClienteDireccion(e.target.value)} className="px-3 py-2 rounded text-sm" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.white }} />
+                        {clienteEncontrado?.direccion && clienteDireccion === clienteEncontrado.direccion && (
+                          <p className="text-xs" style={{ color: COLORS.gray }}>Esta es tu dirección guardada — puedes editar el campo de arriba si hoy es otra.</p>
+                        )}
                       </>
                     )}
                     <select value={clientePago} onChange={(e) => setClientePago(e.target.value)} className="px-3 py-2 rounded text-sm" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.white }}>
