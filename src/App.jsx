@@ -602,7 +602,7 @@ function ProductCard({ product, categoryEmoji, onAdd, adminMode, onUpdate }) {
 ) : (
   <span className="text-5xl">{categoryEmoji}</span>
 )}
-  <span className="text-5xl">{categoryEmoji}</spa
+  <span className="text-5xl">{categoryEmoji}</span>
         {!product.disponible && <span className="absolute top-2 left-2 font-mono text-[10px] px-2 py-1 rounded" style={{ background: COLORS.black, color: COLORS.red }}>AGOTADO</span>}
       </div>
       <div className="p-4 flex flex-col gap-1 flex-1">
