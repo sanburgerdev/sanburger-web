@@ -591,7 +591,18 @@ function ProductCard({ product, categoryEmoji, onAdd, adminMode, onUpdate }) {
   return (
     <div className="rounded-2xl overflow-hidden flex flex-col" style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, opacity: product.disponible ? 1 : 0.45 }}>
       <div className="h-36 flex items-center justify-center relative" style={{ background: `repeating-linear-gradient(135deg, ${COLORS.panel2}, ${COLORS.panel2} 10px, ${COLORS.black} 10px, ${COLORS.black} 20px)` }}>
-        {product.imagen ? <img src={product.imagen} alt={product.nombre} className="w-full h-full object-cover" /> : <span className="text-5xl">{categoryEmoji}</span>}
+    {product.imagen ? (
+  <img
+    src={`https://wsrv.nl/?url=${encodeURIComponent(product.imagen)}&w=400&q=65&output=webp`}
+    alt={product.nombre}
+    loading="lazy"
+    decoding="async"
+    className="w-full h-full object-cover"
+  />
+) : (
+  <span className="text-5xl">{categoryEmoji}</span>
+)}
+  <span className="text-5xl">{categoryEmoji}</spa
         {!product.disponible && <span className="absolute top-2 left-2 font-mono text-[10px] px-2 py-1 rounded" style={{ background: COLORS.black, color: COLORS.red }}>AGOTADO</span>}
       </div>
       <div className="p-4 flex flex-col gap-1 flex-1">
